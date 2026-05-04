@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>DevOps App</title>
+</head>
+<body>
+  <h1>Frontend Service</h1>
+  <button onclick="fetchData()">Call Backend</button>
+  <p id="output"></p>
+
+  <script>
+    async function fetchData() {
+      const res = await fetch('/api');
+      const data = await res.text();
+      document.getElementById('output').innerText = data;
+    }
+  </script>
+</body>
+</html>

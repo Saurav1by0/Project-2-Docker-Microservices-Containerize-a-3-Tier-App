@@ -1,0 +1,87 @@
+# Pipeline name (just for UI in GitHub Actions)
+name: Build & Deploy to ECS
+
+# Trigger condition
+on:
+  push:
+    branches: [ "main" ]   # Run pipeline ONLY when code is pushed to main branch
+
+jobs:
+  deploy:                  # Job name (you can have multiple jobs)
+    runs-on: ubuntu-latest # GitHub spins up a fresh Ubuntu VM to run your pipeline
+
+    steps:
+
+      # STEP 1: Get your code
+      - name: Checkout code
+        uses: actions/checkout@v3
+        # This pulls your GitHub repo into the runner
+        # Without this, pipeline has no access to your code
+
+      # STEP 2: Authenticate with AWS
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
+        # This sets AWS CLI credentials inside the runner
+        # So future commands (ECR, ECS) can work
+
+      # STEP 3: Login to ECR (Docker registry)
+      - name: Login to ECR
+        run: |
+          aws ecr get-login-password --region ap-south-1 | \
+          docker login --username AWS --password-stdin 890105072489.dkr.ecr.ap-south-1.amazonaws.com
+        # AWS gives a temporary auth token
+        # Docker uses it to authenticate with ECR
+        # This allows push/pull of images
+
+      # ================= FRONTEND =================
+
+      # STEP 4: Build frontend Docker image
+      - name: Build frontend
+        run: docker build -t frontend ./frontend
+        # Builds Docker image from ./frontend folder
+        # -t frontend = local image name
+
+      # STEP 5: Tag + Push frontend image
+      - name: Push frontend
+        run: |
+          docker tag frontend:latest ${{ secrets.FRONTEND_ECR }}:latest
+          docker push ${{ secrets.FRONTEND_ECR }}:latest
+        # Tag maps local image → ECR repo
+        # Push uploads image layers to AWS
+
+      # ================= BACKEND =================
+
+      - name: Build backend
+        run: docker build -t backend ./backend
+
+      - name: Push backend
+        run: |
+          docker tag backend:latest ${{ secrets.BACKEND_ECR }}:latest
+          docker push ${{ secrets.BACKEND_ECR }}:latest
+
+      # ================= NGINX =================
+
+      - name: Build nginx
+        run: docker build -t nginx ./nginx
+
+      - name: Push nginx
+        run: |
+          docker tag nginx:latest ${{ secrets.NGINX_ECR }}:latest
+          docker push ${{ secrets.NGINX_ECR }}:latest
+
+      # ================= DEPLOY =================
+
+      - name: Deploy to ECS
+        run: |
+          aws ecs update-service \
+            --cluster project2-cluster \
+            --service project2-service \
+            --force-new-deployment
+        # This tells ECS:
+        # "Redeploy tasks using latest image"
+        # It DOES NOT rebuild image
+        # It just pulls latest from ECR and restarts containers

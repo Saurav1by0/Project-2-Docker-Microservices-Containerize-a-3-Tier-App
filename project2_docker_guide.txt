@@ -1,0 +1,1035 @@
+================================================================
+PROJECT 2 — DOCKER & MICROSERVICES
+Step-by-step guide for Saurav Gaur
+================================================================
+Machine: Windows laptop with WSL2
+Level: Complete Docker beginner
+Goal: Containerize a 3-tier app, run it with Docker Compose,
+      push images to AWS ECR
+================================================================
+
+"clusterName": "project2-cluster"
+================================================================
+BEFORE YOU START — THE MENTAL MODEL
+================================================================
+
+Three words you need to understand first:
+
+IMAGE
+  A frozen, read-only template. Like a VM snapshot or an
+  app installer (.exe). Stored on disk. Does nothing by itself.
+
+CONTAINER
+  A running instance created FROM an image. Like a running
+  process. You can create 10 containers from 1 image.
+  Delete the container and it's gone — the image stays.
+
+REGISTRY
+  A storage server for images. Docker Hub is the public one.
+  AWS ECR is your private one (connects back to Project 1).
+
+Analogy:
+  Image     = a recipe card
+  Container = the dish you cooked from it
+  Registry  = the cookbook library
+
+
+================================================================
+PHASE 0 — SETUP: GET DOCKER RUNNING IN WSL2
+================================================================
+
+----------------------------------------------------------------
+STEP 0.1 — Install Docker Desktop on Windows
+----------------------------------------------------------------
+
+Plain English:
+  Docker Desktop for Windows integrates with WSL2. Once
+  installed, every docker command you type in your WSL2
+  terminal works as if you're on a Linux server. This is
+  exactly how it works in production.
+
+Actions:
+  1. Go to https://www.docker.com/products/docker-desktop/
+  2. Download and install Docker Desktop for Windows
+  3. Open Docker Desktop after installation
+  4. Go to: Settings → Resources → WSL Integration
+  5. Toggle ON for your Ubuntu/WSL2 distro
+  6. Click "Apply & Restart"
+
+----------------------------------------------------------------
+STEP 0.2 — Verify Docker works in WSL2
+----------------------------------------------------------------
+
+Plain English:
+  Open your WSL2 terminal and run these two commands.
+  If both work, you're ready. If not, the fix is in the
+  tip below.
+
+Commands:
+
+  docker --version
+
+  docker run hello-world
+
+What to expect:
+  --version prints something like: Docker version 24.x.x
+  hello-world prints: "Hello from Docker!"
+
+What each part means:
+  docker --version     Confirms the CLI is available in WSL2
+  docker run           Downloads and starts a container
+  hello-world          A tiny test image from Docker Hub
+
+TIP:
+  If you get "docker: command not found" — go back to
+  Docker Desktop → Settings → WSL Integration → make sure
+  your Ubuntu distro is toggled ON → restart WSL2 terminal.
+
+
+================================================================
+PHASE 1 — CONTAINERS: RUN, INSPECT, DEBUG
+================================================================
+
+----------------------------------------------------------------
+STEP 1.1 — Pull an image and see what you have
+----------------------------------------------------------------
+
+Plain English:
+  An image is a pre-built template. docker pull downloads
+  one from Docker Hub to your machine. docker images lists
+  everything downloaded locally. You don't always need to
+  pull manually — docker run does it automatically.
+
+Commands:
+
+  docker pull nginx:alpine
+
+  docker images
+
+What each part means:
+  docker pull          Download an image from Docker Hub
+  nginx:alpine         Image name:tag. alpine = smallest version
+                       (40MB vs 187MB for default nginx)
+  docker images        List all images stored on your machine
+
+Output looks like:
+  REPOSITORY   TAG       IMAGE ID       SIZE
+  nginx        alpine    abc123def456   40.7MB
+  hello-world  latest    xyz789abc123   13.3kB
+
+TIP:
+  Always specify a tag (nginx:alpine, python:3.11-slim).
+  Never use just nginx or python with no tag — that defaults
+  to :latest which changes over time and breaks builds.
+
+----------------------------------------------------------------
+STEP 1.2 — Run your first real container
+----------------------------------------------------------------
+
+Plain English:
+  docker run takes an image and starts a live container from
+  it. It's the most important Docker command. You control
+  the name, whether it runs in background, and which ports
+  are accessible from your laptop.
+
+Analogy:
+  Like pressing Play on a VM snapshot. The image is the
+  snapshot. The container is the running machine.
+
+Command:
+
+  docker run \
+    --name my-nginx \
+    --detach \
+    --publish 8080:80 \
+    nginx:alpine
+
+After running:
+  Open your browser and go to: http://localhost:8080
+  You should see the nginx welcome page.
+  A real web server, running inside a container on your laptop.
+
+What each part means:
+  --name my-nginx        Gives the container a name you choose.
+                         Without this, Docker picks something
+                         random like "happy_einstein".
+  --detach               Runs in the background. Without this,
+                         logs fill your terminal and Ctrl+C
+                         kills the container.
+  --publish 8080:80      Maps port 8080 on your laptop to port
+                         80 inside the container.
+                         Format is always HOST:CONTAINER.
+                         You visit :8080, nginx hears :80.
+  nginx:alpine           The image to start from.
+
+----------------------------------------------------------------
+STEP 1.3 — Inspect a running container
+----------------------------------------------------------------
+
+Plain English:
+  Three commands you'll use every single day as a DevOps
+  engineer. ps shows what's running. logs shows what the
+  app is printing. exec gets you a shell inside — like SSH
+  but for containers.
+
+Analogy:
+  ps    = task manager
+  logs  = event viewer
+  exec  = remote desktop into the container
+
+Commands:
+
+  docker ps
+
+  docker ps --all
+
+  docker logs my-nginx
+
+  docker logs --follow my-nginx
+
+  docker exec --interactive --tty my-nginx sh
+
+  (once inside the container):
+    ls /etc/nginx/
+    cat /etc/nginx/nginx.conf
+    exit
+
+What each part means:
+  docker ps              Shows running containers only.
+                         Columns: ID, image, status, ports, name
+  --all                  Shows stopped containers too.
+                         Critical for debugging crashes.
+  docker logs my-nginx   Prints everything the app printed
+                         to stdout/stderr.
+  --follow               Keeps log stream open. Ctrl+C to stop.
+                         Like tail -f for containers.
+  exec                   Runs a command inside a running container
+  --interactive --tty    Opens a real interactive terminal.
+                         Always use both flags together (-it).
+  sh                     The shell to open. Use sh for alpine
+                         images. Use bash for Ubuntu images.
+
+TIP:
+  docker exec is how you debug broken containers. Get inside,
+  check files, run curl to test internal endpoints, see if
+  environment variables are set correctly.
+
+WATCH OUT:
+  Changes you make inside a running container are NOT saved.
+  If the container restarts, your changes are gone.
+  The image itself is never modified.
+
+----------------------------------------------------------------
+STEP 1.4 — Stop and clean up containers
+----------------------------------------------------------------
+
+Plain English:
+  Stopped containers still take up disk space. They are not
+  deleted automatically. docker stop shuts it down gracefully.
+  docker rm deletes it. In production, containers are
+  ephemeral — create, use, delete.
+
+Analogy:
+  stop = power button
+  rm   = throwing the machine in the bin
+  The image (blueprint) stays. You can always make a new one.
+
+Commands:
+
+  docker stop my-nginx
+
+  docker rm my-nginx
+
+  docker rm --force my-nginx
+
+  docker system prune
+
+What each part means:
+  docker stop            Sends SIGTERM. App gets chance to
+                         shut down cleanly. After 10 seconds,
+                         Docker force-kills it.
+  docker rm              Deletes the container record.
+                         Does NOT delete the image.
+  --force                Skips the stop step. Sends SIGKILL
+                         immediately. Use when container is frozen.
+  docker system prune    Frees disk space. Removes stopped
+                         containers, unused images, unused networks.
+                         Safe to run regularly in development.
+
+TIP:
+  During development: docker rm --force container-name every
+  time you want to re-run with new settings. Clean slate.
+
+
+================================================================
+PHASE 2 — DOCKERFILE: BUILD YOUR OWN IMAGES
+================================================================
+
+----------------------------------------------------------------
+STEP 2.1 — Create your project and app files
+----------------------------------------------------------------
+
+Plain English:
+  First create a small Python Flask app. This is what you'll
+  containerize. Flask is a lightweight Python web framework —
+  think of it as a simple web server you write yourself.
+
+Commands:
+
+  mkdir my-flask-app
+  cd my-flask-app
+
+  cat > app.py << 'EOF'
+  from flask import Flask, jsonify
+
+  app = Flask(__name__)
+
+  @app.route('/health')
+  def health():
+      return jsonify({"status": "ok"})
+
+  @app.route('/')
+  def home():
+      return jsonify({"message": "Hello from Docker!"})
+
+  if __name__ == '__main__':
+      app.run(host='0.0.0.0', port=5000)
+  EOF
+
+  echo "flask==3.0.0" > requirements.txt
+
+What each part means:
+  @app.route('/health')  When someone visits /health, run
+                         this function and return the result.
+  host='0.0.0.0'         Listen on all network interfaces.
+                         Without this, the app only listens
+                         on localhost INSIDE the container —
+                         you can never reach it from outside.
+  port=5000              The app listens on port 5000.
+  requirements.txt       Lists Python packages to install.
+                         Docker will use this during the build.
+
+----------------------------------------------------------------
+STEP 2.2 — Write your first Dockerfile
+----------------------------------------------------------------
+
+Plain English:
+  A Dockerfile is a recipe. It tells Docker: start from this
+  base image, copy these files, run these commands, expose
+  this port, start this process. Docker reads it top to
+  bottom and creates a layered image. Each line is one layer.
+
+Analogy:
+  Like a recipe card. The base image is your empty kitchen.
+  Each instruction adds an ingredient. The result is a dish
+  (image) that can be served anywhere in the world.
+
+Command:
+
+  cat > Dockerfile << 'EOF'
+  FROM python:3.11-slim
+
+  WORKDIR /app
+
+  COPY requirements.txt .
+  RUN pip install --no-cache-dir -r requirements.txt
+
+  COPY . .
+
+  EXPOSE 5000
+
+  CMD ["python", "app.py"]
+  EOF
+
+What each line means:
+  FROM python:3.11-slim   Start from official Python image.
+                          slim = smaller, stripped-down version.
+
+  WORKDIR /app            All following commands run from /app
+                          inside the container. Creates the
+                          folder if it doesn't exist.
+
+  COPY requirements.txt . Copy just requirements.txt first —
+                          NOT all files. This is deliberate.
+                          See the tip below for why.
+
+  RUN pip install ...     Runs during BUILD. Installs packages
+                          into the image permanently.
+                          --no-cache-dir keeps image smaller.
+
+  COPY . .                Copy all remaining source code.
+                          Done AFTER pip install. This order
+                          is critical for fast builds.
+
+  EXPOSE 5000             Documents that the app uses port 5000.
+                          Does NOT open the port — --publish
+                          does that when you run the container.
+
+  CMD ["python", "app.py"] The command that runs when a
+                          container starts from this image.
+
+THE MOST IMPORTANT TIP IN THIS PROJECT:
+  Copy requirements.txt FIRST, then pip install, then copy
+  your code. Here's why:
+  Docker caches each layer. If you change your Python code
+  but NOT requirements.txt, Docker reuses the pip install
+  layer from cache — skips reinstalling packages entirely.
+  Build goes from 3 minutes down to 20 seconds.
+  If you copy everything first then pip install, ANY code
+  change forces a full package reinstall. Every. Single. Time.
+
+----------------------------------------------------------------
+STEP 2.3 — Build the image and run a container from it
+----------------------------------------------------------------
+
+Plain English:
+  docker build reads your Dockerfile and creates an image
+  layer by layer. You watch it happen step by step. Then
+  you run a container from your new image exactly like you
+  ran nginx earlier.
+
+Analogy:
+  build = cooking the dish from the recipe
+  run   = serving it to a customer
+
+Commands:
+
+  docker build --tag my-flask-app:v1 .
+
+  docker run \
+    --name flask-app \
+    --detach \
+    --publish 5000:5000 \
+    my-flask-app:v1
+
+  curl http://localhost:5000/health
+  curl http://localhost:5000/
+
+Expected output:
+  {"status": "ok"}
+  {"message": "Hello from Docker!"}
+
+What each part means:
+  --tag my-flask-app:v1  Name:tag for your image. In real
+                         CI/CD you'd use the git commit SHA
+                         instead of v1 (e.g. my-flask-app:a3f9c12)
+  . (the dot at the end) Tells Docker where to find the
+                         Dockerfile. Dot = current directory.
+                         Always run docker build from the
+                         project root folder.
+  curl http://localhost:5000/health
+                         Tests the container is actually
+                         serving traffic. If this returns JSON,
+                         your Dockerfile is correct.
+
+TIP:
+  If the build fails, read the error on the failing step.
+  Most common issues:
+  - Typo in a Dockerfile instruction name
+  - Wrong filename in COPY (case-sensitive)
+  - pip package name doesn't exist
+
+----------------------------------------------------------------
+STEP 2.4 — Multi-stage Dockerfile (production version)
+----------------------------------------------------------------
+
+Plain English:
+  A multi-stage build uses two FROM instructions in one
+  Dockerfile. Stage 1 is the builder — it has all the build
+  tools. Stage 2 is the runtime — it copies ONLY the final
+  output from stage 1, leaving the tools behind.
+  Result: smaller image, nothing for attackers to exploit.
+
+Analogy:
+  Stage 1 = assembling a phone in a factory (lots of tools)
+  Stage 2 = shipping just the finished phone to the customer
+  (clean box, no factory equipment)
+
+Command:
+
+  cat > Dockerfile.prod << 'EOF'
+  # Stage 1: Builder
+  FROM python:3.11-slim AS builder
+
+  WORKDIR /app
+  COPY requirements.txt .
+
+  RUN pip install --no-cache-dir --user -r requirements.txt
+
+  # Stage 2: Runtime (this becomes the final image)
+  FROM python:3.11-slim
+
+  WORKDIR /app
+
+  COPY --from=builder /root/.local /root/.local
+  COPY . .
+
+  RUN useradd --create-home appuser
+  USER appuser
+
+  ENV PATH=/root/.local/bin:$PATH
+  EXPOSE 5000
+
+  CMD ["python", "app.py"]
+  EOF
+
+  docker build --tag my-flask-app:prod --file Dockerfile.prod .
+
+  docker images my-flask-app
+
+What each part means:
+  AS builder             Names stage 1 "builder". Stage 2
+                         references this name.
+  COPY --from=builder    Copies files from stage 1 into stage 2.
+                         Only what you copy comes through.
+                         Build tools stay in stage 1 (discarded).
+  useradd + USER appuser Creates a non-root user and switches to
+                         it. Containers run as root by default.
+                         That is dangerous.
+  ENV PATH=...           Makes pip-installed packages findable
+                         when running as appuser.
+
+WATCH OUT (interview answer):
+  Why not run as root inside a container?
+  If an attacker exploits your app and you're running as root,
+  they can write to any file, install malware, and potentially
+  escape the container entirely. Running as a non-root user
+  limits what a compromised app can do.
+
+
+================================================================
+PHASE 3 — DOCKER COMPOSE: RUN MULTIPLE CONTAINERS AS ONE APP
+================================================================
+
+----------------------------------------------------------------
+STEP 3.1 — Set up the project structure
+----------------------------------------------------------------
+
+Plain English:
+  For a real microservices app you need multiple services —
+  a database, an API server, a frontend. Each runs in its
+  own container. Docker Compose lets you define and manage
+  all of them together in one file.
+
+Commands:
+
+  mkdir ecommerce-app
+  cd ecommerce-app
+  mkdir api frontend
+
+  Your structure will look like:
+  ecommerce-app/
+  ├── api/
+  │   ├── app.py
+  │   ├── requirements.txt
+  │   └── Dockerfile
+  ├── frontend/
+  │   └── Dockerfile
+  └── docker-compose.yml
+
+----------------------------------------------------------------
+STEP 3.2 — Create the Flask API service
+----------------------------------------------------------------
+
+Commands:
+
+  cat > api/app.py << 'EOF'
+  from flask import Flask, jsonify
+  import os
+
+  app = Flask(__name__)
+
+  DB_URL = os.environ.get('DATABASE_URL', 'not set')
+
+  @app.route('/health')
+  def health():
+      return jsonify({"status": "ok"})
+
+  @app.route('/')
+  def home():
+      return jsonify({
+          "message": "API is running",
+          "db_url": DB_URL
+      })
+
+  if __name__ == '__main__':
+      app.run(host='0.0.0.0', port=5000, debug=True)
+  EOF
+
+  echo "flask==3.0.0" > api/requirements.txt
+
+  cat > api/Dockerfile << 'EOF'
+  FROM python:3.11-slim
+  WORKDIR /app
+  COPY requirements.txt .
+  RUN pip install --no-cache-dir -r requirements.txt
+  COPY . .
+  EXPOSE 5000
+  CMD ["python", "app.py"]
+  EOF
+
+----------------------------------------------------------------
+STEP 3.3 — Write docker-compose.yml
+----------------------------------------------------------------
+
+Plain English:
+  This is the heart of this phase. docker-compose.yml defines
+  every service (container), their settings, and how they
+  connect. Instead of 5 long docker run commands, you write
+  it once as config. One command starts everything.
+
+Analogy:
+  Like a stage manager's script. Every actor (container),
+  their costume (image), their position (ports), and their
+  cues (depends_on) — written once, runs on command.
+
+Command:
+
+  cat > docker-compose.yml << 'EOF'
+  version: '3.9'
+
+  networks:
+    app-network:
+      driver: bridge
+
+  volumes:
+    postgres-data:
+
+  services:
+
+    db:
+      image: postgres:15-alpine
+      container_name: postgres
+      environment:
+        POSTGRES_DB: appdb
+        POSTGRES_USER: appuser
+        POSTGRES_PASSWORD: secretpass
+      volumes:
+        - postgres-data:/var/lib/postgresql/data
+      networks:
+        - app-network
+      healthcheck:
+        test: ["CMD-SHELL", "pg_isready -U appuser"]
+        interval: 10s
+        retries: 5
+
+    api:
+      build: ./api
+      container_name: flask-api
+      environment:
+        DATABASE_URL: postgresql://appuser:secretpass@db:5432/appdb
+      ports:
+        - "5000:5000"
+      depends_on:
+        db:
+          condition: service_healthy
+      networks:
+        - app-network
+
+  EOF
+
+What each section means:
+
+  networks: app-network
+    Creates a private network. Every container on it can
+    reach others using the SERVICE NAME as hostname.
+    "db", "api" become valid DNS names inside the network.
+
+  volumes: postgres-data
+    Named volume managed by Docker. Data persists across
+    container restarts. Without this, database data is wiped
+    every time the container stops.
+
+  healthcheck: pg_isready
+    pg_isready is a PostgreSQL tool that returns success only
+    when the DB is ready for connections. Compose waits for
+    this to pass before starting api.
+
+  depends_on: condition: service_healthy
+    "Don't start api until db's healthcheck is passing."
+    Without this: api starts, tries to connect, DB isn't ready
+    yet, api crashes. Race condition.
+
+  DATABASE_URL: ...@db:5432/...
+    Notice "db" in the URL — that is the service name, not an
+    IP address. Docker's DNS inside the network resolves
+    "db" to the postgres container's IP automatically.
+
+WATCH OUT:
+  Never put real passwords in docker-compose.yml.
+  Use a .env file and reference them as ${DB_PASSWORD}.
+  Add .env to .gitignore so it never goes to Git.
+
+----------------------------------------------------------------
+STEP 3.4 — Start, manage, and stop everything
+----------------------------------------------------------------
+
+Plain English:
+  Three commands you use every single day. up starts
+  everything. down stops everything. logs shows output
+  from all containers at once.
+
+Analogy:
+  up    = pressing start on a whole recording studio
+  down  = shutting everything off with one switch
+  logs  = the mixing board showing all channels at once
+
+Commands:
+
+  docker compose up --detach
+
+  docker compose ps
+
+  docker compose logs
+
+  docker compose logs api
+
+  docker compose logs --follow api
+
+  docker compose restart api
+
+  docker compose down
+
+  docker compose down --volumes
+
+  docker compose up --build --detach
+
+What each part means:
+  up --detach            Starts all services in background.
+                         Without --detach, all logs fill
+                         your terminal.
+
+  docker compose ps      Status of all services. Shows which
+                         are running, which exited, and ports.
+
+  docker compose logs    Logs from ALL services mixed together.
+                         Useful for seeing startup sequence.
+
+  logs api               Logs from just the api service.
+                         Use when debugging one specific service.
+
+  --follow               Tails the log stream live.
+                         Press Ctrl+C to stop watching.
+
+  restart api            Restart one service without touching
+                         others. Use after changing app code.
+
+  down                   Stops and removes containers.
+                         Keeps volumes (database data survives).
+
+  down --volumes         CAREFUL: deletes named volumes.
+                         Your database data is permanently gone.
+                         Only use in development to reset state.
+
+  up --build             Forces Docker to rebuild images first.
+                         Use every time you change a Dockerfile.
+
+TIP:
+  During development your daily loop is:
+  1. Change your code
+  2. docker compose restart api
+  3. docker compose logs --follow api
+  No rebuild needed unless the Dockerfile changed.
+
+
+================================================================
+PHASE 4 — ECR: PUSH YOUR IMAGE TO AWS
+================================================================
+
+This connects back to your AWS account from Project 1.
+
+----------------------------------------------------------------
+STEP 4.1 — Create an ECR repository
+----------------------------------------------------------------
+
+Plain English:
+  ECR (Elastic Container Registry) is AWS's private Docker
+  Hub. Your images are stored inside your AWS account. Only
+  your AWS resources (EC2, EKS) can pull from it.
+
+Analogy:
+  Docker Hub = public market
+  ECR = your private warehouse that only your team can access
+
+Commands:
+
+  aws ecr create-repository \
+    --repository-name ecommerce/api \
+    --image-scanning-configuration scanOnPush=true \
+    --region ap-south-1 \
+    --query 'repository.repositoryUri' \
+    --output text
+
+  aws ecr describe-repositories \
+    --region ap-south-1 \
+    --query 'repositories[*].[repositoryName,repositoryUri]' \
+    --output table
+
+What each part means:
+  --repository-name ecommerce/api
+                         The repo name. ecommerce/ is a prefix
+                         to keep things organised when you
+                         have many images.
+  --image-scanning-configuration scanOnPush=true
+                         Every pushed image is automatically
+                         scanned for known CVEs (security
+                         vulnerabilities). Free. Always enable.
+  --query ...repositoryUri
+                         Extracts the full URI like:
+                         123456.dkr.ecr.ap-south-1.amazonaws.com/ecommerce/api
+                         Save this — you need it for tagging.
+
+TIP:
+  ECR is free for the first 500MB per month.
+  For learning purposes you will not pay anything.
+
+----------------------------------------------------------------
+STEP 4.2 — Authenticate Docker to ECR
+----------------------------------------------------------------
+
+Plain English:
+  ECR is private. Before Docker can push to it, it needs
+  credentials. AWS generates a temporary password (valid
+  12 hours) and you pipe it directly to docker login.
+  After this, Docker can push and pull from your registry.
+
+Analogy:
+  Like getting a visitor badge at a secure building.
+  AWS issues it, it expires in 12 hours, it only works
+  for your building (account).
+
+Commands:
+
+  ACCOUNT_ID=$(aws sts get-caller-identity \
+    --query Account --output text)
+
+  REGION=ap-south-1
+
+  ECR_REGISTRY="$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com"
+
+  aws ecr get-login-password --region $REGION | \
+    docker login \
+      --username AWS \
+      --password-stdin \
+      $ECR_REGISTRY
+
+Expected output:
+  Login Succeeded
+
+What each part means:
+  aws sts get-caller-identity
+                         Returns your AWS account details.
+                         The --query Account extracts just
+                         the 12-digit account ID.
+  get-login-password     Generates a 12-hour temporary password
+                         for Docker auth to ECR specifically.
+  | (pipe)               Passes the password directly to
+                         docker login. It never appears on screen.
+  --username AWS         ECR always uses "AWS" as the username.
+                         The real auth is the password (token).
+  --password-stdin       Reads password from stdin (the pipe)
+                         instead of prompting you to type it.
+
+TIP:
+  This login expires after 12 hours. In CI/CD pipelines
+  (Jenkins, GitHub Actions) you run this command at the
+  START of every pipeline run before any docker push.
+
+----------------------------------------------------------------
+STEP 4.3 — Tag and push your image
+----------------------------------------------------------------
+
+Plain English:
+  Before pushing to ECR, you rename (tag) your local image
+  with the full ECR address. Docker only pushes to a registry
+  that matches the image name — so you must tag first.
+  Then docker push uploads it.
+
+Analogy:
+  Tag  = writing the delivery address on a parcel
+  Push = handing it to the postal service
+
+Commands:
+
+  IMAGE_TAG=$(git rev-parse --short HEAD 2>/dev/null || echo "v1")
+
+  docker tag my-flask-app:prod \
+    $ECR_REGISTRY/ecommerce/api:$IMAGE_TAG
+
+  docker tag my-flask-app:prod \
+    $ECR_REGISTRY/ecommerce/api:latest
+
+  docker push $ECR_REGISTRY/ecommerce/api:$IMAGE_TAG
+  docker push $ECR_REGISTRY/ecommerce/api:latest
+
+  aws ecr list-images \
+    --repository-name ecommerce/api \
+    --region ap-south-1
+
+What each part means:
+  git rev-parse --short HEAD
+                         Gets the first 7 characters of the
+                         current git commit hash (e.g. a3f9c12).
+                         Unique per code change. This is how
+                         teams know exactly which code is
+                         running in production.
+  docker tag SOURCE DEST Creates an alias. Does not copy the
+                         image — just adds another name
+                         pointing to the same data.
+  docker push            Uploads image layers to ECR. Docker
+                         only uploads layers ECR doesn't have
+                         yet — subsequent pushes are fast.
+  aws ecr list-images    Confirms the image arrived in ECR.
+
+WATCH OUT:
+  In real production, the IMAGE_TAG is always the git commit
+  SHA. Never use "latest" as your only tag. If something
+  breaks you won't know which version of code is running.
+
+
+================================================================
+PHASE 5 — INTERVIEW QUESTIONS
+================================================================
+
+These are the questions you will be asked. Learn the answers
+in your own words — don't memorise, understand.
+
+----------------------------------------------------------------
+MOST ASKED (near-guaranteed in any DevOps interview)
+----------------------------------------------------------------
+
+Q: What is the difference between an image and a container?
+
+A: An image is a static, read-only template — like a class
+   in OOP or a VM snapshot. A container is a running instance
+   created FROM an image — like an object created from a class.
+   You can run many containers from one image simultaneously.
+   Images are stored on disk. Containers are running processes.
+   Delete the container and it's gone. The image stays.
+
+---
+
+Q: What is the difference between CMD and ENTRYPOINT?
+
+A: ENTRYPOINT defines the fixed executable that always runs.
+   CMD provides default arguments to it, which can be
+   overridden at runtime. If you run:
+     docker run myimage bash
+   CMD is replaced by "bash", but ENTRYPOINT still runs.
+   In practice: CMD ["python", "app.py"] is most common.
+   Use ENTRYPOINT when the container is a specific tool that
+   should always run regardless of arguments passed.
+
+---
+
+Q: Why do we copy requirements.txt before copying app code
+   in a Dockerfile?
+
+A: Docker caches each layer. If requirements.txt hasn't
+   changed, Docker reuses the cached pip install layer and
+   skips reinstalling packages — even if app code changed.
+   Build time drops from 3 minutes to 20 seconds.
+   If you COPY everything first then pip install, any code
+   change invalidates the pip layer. Full reinstall every time.
+
+---
+
+Q: What is a multi-stage build and why use it?
+
+A: A multi-stage build uses multiple FROM instructions in
+   one Dockerfile. Stage 1 builds the app (needs compilers,
+   dev tools). Stage 2 is the final runtime image — copies
+   only the built artifacts from stage 1. Build tools are
+   discarded. Results in a much smaller image with no tools
+   for attackers to exploit. A Java app can go from 800MB
+   down to 120MB using multi-stage builds.
+
+---
+
+Q: How do containers communicate with each other in
+   Docker Compose?
+
+A: Containers on the same Docker network can reach each
+   other using the SERVICE NAME as the hostname. If your
+   Compose file has a service called "db", the api container
+   connects to it via postgresql://db:5432/... — Docker's
+   internal DNS resolves "db" to the container's IP
+   automatically. No hardcoded IPs needed.
+
+---
+
+Q: What happens to data when a container is deleted?
+
+A: All data written inside the container filesystem is lost
+   when the container is removed. Containers are ephemeral
+   by design. To persist data you use volumes. A named volume
+   exists independently of any container — even if you delete
+   and recreate the postgres container, the database survives
+   because it lives in the volume, not in the container.
+
+---
+
+Q: How do you debug a container that keeps crashing?
+
+A: Three steps:
+   1. docker ps --all — confirm it's in Exited state
+   2. docker logs container-name — the crash error is here
+   3. docker run -it --entrypoint sh image-name — override
+      CMD and get a shell inside the image. Manually run
+      the app command and see the error interactively.
+
+   Common causes: missing environment variable, wrong file
+   path, port already in use, package not installed.
+
+---
+
+Q: What is the difference between docker stop and docker kill?
+
+A: docker stop sends SIGTERM — the app gets time to shut
+   down gracefully (close DB connections, finish in-flight
+   requests). After 10 seconds, Docker sends SIGKILL.
+   docker kill sends SIGKILL immediately — process terminated
+   with no cleanup. Always use stop in production. Use kill
+   only when a container is frozen and not responding to stop.
+
+
+================================================================
+CHECKLIST — YOU'RE READY FOR PROJECT 3 WHEN:
+================================================================
+
+[ ] docker run hello-world works in your WSL2 terminal
+[ ] You built a Flask image from a Dockerfile and ran it
+[ ] You understand WHY requirements.txt is copied before code
+[ ] You built a multi-stage image and compared the sizes
+[ ] docker compose up starts all 3 services without errors
+[ ] You can get a shell inside a running container
+[ ] Your image is pushed to ECR and visible in AWS console
+[ ] You can answer all 8 interview questions in your own words
+
+
+================================================================
+QUICK REFERENCE — MOST USED COMMANDS
+================================================================
+
+Start a container           docker run --name x --detach --publish 8080:80 nginx:alpine
+See running containers      docker ps
+See all containers          docker ps --all
+Read logs                   docker logs --follow container-name
+Get inside a container      docker exec -it container-name sh
+Stop a container            docker stop container-name
+Delete a container          docker rm container-name
+Build an image              docker build --tag name:tag .
+List images                 docker images
+Delete an image             docker rmi image-name:tag
+Start all services          docker compose up --detach
+Stop all services           docker compose down
+Restart one service         docker compose restart api
+Rebuild and start           docker compose up --build --detach
+ECR login                   aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin $ECR_REGISTRY
+Push image                  docker push $ECR_REGISTRY/ecommerce/api:tag
+Free up disk space          docker system prune
+
+
+================================================================
+End of Project 2 Guide
+================================================================
