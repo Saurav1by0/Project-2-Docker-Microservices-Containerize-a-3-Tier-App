@@ -14,6 +14,7 @@ const pool = new Pool({
   }
 });
 
+
 app.get('/api/health', (req, res) => {
   res.send('OK');
 });
